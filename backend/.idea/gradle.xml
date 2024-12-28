@@ -5,7 +5,8 @@
     <option name="linkedExternalProjectsSettings">
       <GradleProjectSettings>
         <option name="externalProjectPath" value="$PROJECT_DIR$/backend" />
-        <option name="gradleJvm" value="#JAVA_HOME" />
+        <option name="gradleHome" value="$PROJECT_DIR$/../../../../../Tools/Gradle/gradle-8.10.2" />
+        <option name="gradleJvm" value="openjdk-21" />
         <option name="modules">
           <set>
             <option value="$PROJECT_DIR$/backend" />

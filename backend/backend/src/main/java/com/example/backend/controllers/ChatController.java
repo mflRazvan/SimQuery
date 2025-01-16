@@ -3,67 +3,50 @@ package com.example.backend.controllers;
 import com.example.backend.models.Chat;
 import com.example.backend.models.Message;
 import com.example.backend.services.ChatService;
-import com.example.backend.utils.converter.ChatConverterDto;
-import com.example.backend.utils.converter.MessageConverterDto;
 import com.example.backend.utils.dtos.ChatDto;
-import com.example.backend.utils.dtos.MessageDto;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @RestController
-@RequestMapping("/chats")
+@RequestMapping("/api/v1/chats")
+@RequiredArgsConstructor
 public class ChatController {
-    @Autowired
-    private ChatService chatService;
-
-    private final ChatConverterDto dtoConverter = new ChatConverterDto();
-    private final MessageConverterDto messageDtoConverter = new MessageConverterDto();
+    private final ChatService chatService;
 
     @GetMapping
-    public ResponseEntity<List<ChatDto>> getAllChats() {
-        List<ChatDto> result = new ArrayList<>();
-        List<Chat> chats = chatService.getAll();
-        for (Chat chat : chats) {
-            result.add(dtoConverter.createFromEntity(chat));
-        }
-        return new ResponseEntity<>(result, HttpStatus.OK);
+    public ResponseEntity<List<Chat>> getAllChats() {
+        return ResponseEntity.ok(chatService.getAllChats());
     }
 
-    @GetMapping("{id}")
-    public ResponseEntity<ChatDto> getById(@PathVariable int id) {
-        return new ResponseEntity<>(dtoConverter.createFromEntity(chatService.getById(id)), HttpStatus.OK);
+    @GetMapping("/{externalId}")
+    public ResponseEntity<Chat> getChatByExternalId(@PathVariable UUID externalId) {
+        return ResponseEntity.ok(chatService.getChatByExternalId(externalId));
     }
 
-    @GetMapping("{id}/messages")
-    public ResponseEntity<List<MessageDto>> getChatsMessages(@PathVariable int id) {
-        List<MessageDto> result = new ArrayList<>();
-        List<Message> messages = chatService.getChatsMessages(id);
-        for (Message message : messages) {
-            result.add(messageDtoConverter.createFromEntity(message));
-        }
-        return new ResponseEntity<>(result, HttpStatus.OK);
+    @GetMapping("/{externalId}/messages")
+    public ResponseEntity<List<Message>> getChatMessages(@PathVariable UUID externalId) {
+        return ResponseEntity.ok(chatService.getChatMessages(externalId));
     }
 
-    /*@PostMapping
-    public ResponseEntity<Chat> createChat(@RequestBody Chat chat) {
-        chatService.add(chat);
-        return new ResponseEntity<>(chat, HttpStatus.CREATED);
-    }*/
-
-    @PutMapping
-    public ResponseEntity<ChatDto> updateChat(@RequestBody ChatDto chatDto) {
-        chatService.update(dtoConverter.createFromDto(chatDto));
-        return new ResponseEntity<>(chatDto, HttpStatus.OK);
+    @PostMapping
+    public ResponseEntity<Chat> createChat(@RequestBody ChatDto chatDto) {
+        return ResponseEntity.ok(chatService.createChat(chatDto));
     }
 
-    @DeleteMapping("{id}")
-    public ResponseEntity<String> deleteChat(@PathVariable int id) {
-        chatService.delete(id);
-        return new ResponseEntity<>("Record deleted successfully", HttpStatus.OK);
+    @PutMapping("/{externalId}")
+    public ResponseEntity<Chat> updateChat(
+            @PathVariable UUID externalId,
+            @RequestBody ChatDto chatDto) {
+        return ResponseEntity.ok(chatService.updateChat(externalId, chatDto));
+    }
+
+    @DeleteMapping("/{externalId}")
+    public ResponseEntity<Void> deleteChat(@PathVariable UUID externalId) {
+        chatService.deleteChat(externalId);
+        return ResponseEntity.noContent().build();
     }
 }

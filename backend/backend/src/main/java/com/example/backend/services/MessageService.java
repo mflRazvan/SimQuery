@@ -1,96 +1,136 @@
 package com.example.backend.services;
 
+import com.example.backend.exceptions.AIServiceException;
+import com.example.backend.exceptions.MessageNotFoundException;
 import com.example.backend.models.Chat;
 import com.example.backend.models.Message;
-import com.example.backend.repositories.MessageRepo;
+import com.example.backend.models.SenderType;
+import com.example.backend.models.User;
+import com.example.backend.repositories.MessageRepository;
+import com.example.backend.repositories.UserRepository;
 import com.example.backend.utils.SimilarityRequest;
+import com.example.backend.utils.dtos.MessageResponseDto;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
 
-import java.time.LocalDate;
-import java.time.LocalTime;
-import java.util.List;
+import java.util.UUID;
 
 @Service
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
+@Slf4j
 public class MessageService {
-    @Autowired
-    private MessageRepo messageRepo;
+    private final MessageRepository messageRepository;
+    private final ChatService chatService;
+    private final UserRepository userRepository;
+    private final WebClient aiServiceWebClient;
+    private final ObjectMapper objectMapper;
 
-    @Autowired
-    private ChatService chatService;
-
-    private WebClient webClient;
-
-    @Autowired
-    public MessageService(WebClient.Builder webClientBuilder) {
-        this.webClient = webClientBuilder.baseUrl("http://localhost:8000").build();
+    public MessageService(
+            MessageRepository messageRepository,
+            ChatService chatService, UserRepository userRepository,
+            @Qualifier("aiServiceWebClient") WebClient aiServiceWebClient,
+            ObjectMapper objectMapper) {
+        this.messageRepository = messageRepository;
+        this.chatService = chatService;
+        this.userRepository = userRepository;
+        this.aiServiceWebClient = aiServiceWebClient;
+        this.objectMapper = objectMapper;
     }
 
-    public List<Message> getAll(){
-        return messageRepo.findAll();
+    private User getCurrentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String email = authentication.getName();
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
     }
 
-    public Message getById(int id){
-        return messageRepo.findById(id).get();
+    public Message getMessageByExternalId(UUID externalId) {
+        User currentUser = getCurrentUser();
+        return messageRepository.findByExternalId(externalId)
+                .filter(message -> message.getChat().getUser().equals(currentUser))
+                .orElseThrow(() -> new MessageNotFoundException(externalId));
     }
 
-    public Mono<String> add(Message message){
-        if(message.getChatId() == -1){
-            Chat chat = new Chat();
-            chat.setTitle("New chat");
-            chatService.add(chat);
-            message.setChatId(chat.getId());
+    @Transactional
+    public MessageResponseDto createMessage(UUID chatExternalId, String content, SenderType sender) {
+        User currentUser = getCurrentUser();
+        Chat chat = chatService.getChatByExternalId(chatExternalId);
+
+        Message userMessage = Message.builder()
+                .chat(chat)
+                .content(content)
+                .sender(sender)
+                .build();
+
+        Message savedUserMessage = messageRepository.save(userMessage);
+        log.debug("User message saved: {}", savedUserMessage.getExternalId());
+
+        MessageResponseDto.MessageDetails userMessageDetails = new MessageResponseDto.MessageDetails(
+                savedUserMessage.getExternalId(),
+                savedUserMessage.getContent(),
+                savedUserMessage.getSender(),
+                savedUserMessage.getSentAt()
+        );
+
+        MessageResponseDto.MessageDetails aiMessageDetails = null;
+        if (sender == SenderType.USER) {
+            try {
+                String aiResponse = getAIResponse(savedUserMessage);
+                Message aiMessage = Message.builder()
+                        .chat(chat)
+                        .content(aiResponse)
+                        .sender(SenderType.CHATBOT_MODEL)
+                        .build();
+                Message savedAiMessage = messageRepository.save(aiMessage);
+
+                aiMessageDetails = new MessageResponseDto.MessageDetails(
+                        savedAiMessage.getExternalId(),
+                        savedAiMessage.getContent(),
+                        savedAiMessage.getSender(),
+                        savedAiMessage.getSentAt()
+                );
+            } catch (Exception e) {
+                log.error("Error getting AI response", e);
+            }
         }
-        messageRepo.save(message);
-        return getResponseFromModel(message);
+
+        return new MessageResponseDto(userMessageDetails, aiMessageDetails);
     }
 
-    public Mono<String> getResponseFromModel(Message sentMessage) {
-        SimilarityRequest request = new SimilarityRequest(sentMessage.getContent());
+    private String getAIResponse(Message userMessage) {
+        SimilarityRequest request = new SimilarityRequest(userMessage.getContent());
+        log.debug("Sending request to AI service: {}", request.getPrompt());
 
-        return webClient.post() // HTTP GET request
-                .uri("/get-similarity/") // URI to make the call
+        String response = aiServiceWebClient.post()
+                .uri("/get-similarity")
                 .bodyValue(request)
-                .retrieve() // Initiates the request
-                .bodyToMono(String.class) // Converts the response body to a Mono
-                .flatMap(chatbotResponse -> {
-                    try{
-                        ObjectMapper objectMapper = new ObjectMapper();
-                        JsonNode rootNode = objectMapper.readTree(chatbotResponse);
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
 
-                        String similarityScore = rootNode.get("similarity_score").asText();
-                        Message chatResponse = new Message(0L, sentMessage.getChatId(), similarityScore, LocalDate.now(), LocalTime.now(), "model");
-                        this.messageRepo.save(chatResponse);
-                        return Mono.just(similarityScore);
-                    } catch (Exception e){
-                        System.out.println("Error parsing response: " + e.getMessage());
-                        return Mono.error(new RuntimeException("Failed to parse the response from the model"));
-                    }
-                });
-    }
-
-    public void update(Message message){
-        Message updatedMessage = messageRepo.findById(Math.toIntExact(message.getId())).orElse(null);
-        if(updatedMessage != null) {
-            updatedMessage.setId(message.getId());
-            updatedMessage.setContent(message.getContent());
-            updatedMessage.setSentDate(message.getSentDate());
-            updatedMessage.setSentTime(message.getSentTime());
-            messageRepo.save(updatedMessage);
+        try {
+            JsonNode rootNode = objectMapper.readTree(response);
+            String similarityScore = rootNode.get("similarity_score").asText();
+            log.debug("Received similarity score: {}", similarityScore);
+            return similarityScore;
+        } catch (Exception e) {
+            log.error("Failed to process AI response", e);
+            throw new AIServiceException("Failed to process AI response", e);
         }
     }
 
-    public void delete(int id){
-        messageRepo.deleteById(id);
+    @Transactional
+    public void deleteMessage(UUID externalId) {
+        User currentUser = getCurrentUser();
+        Message message = messageRepository.findByExternalId(externalId)
+                .filter(msg -> msg.getChat().getUser().equals(currentUser))
+                .orElseThrow(() -> new MessageNotFoundException(externalId));
+        messageRepository.delete(message);
     }
 }

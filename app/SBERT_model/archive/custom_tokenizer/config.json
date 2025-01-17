@@ -1,0 +1,6 @@
+{
+    "model_type": "bert",
+    "tokenizer_class": "BertTokenizer",
+    "vocab_size": 30000,
+    "do_lower_case": true
+}

@@ -1,0 +1,7 @@
+name: project-queryminds
+
+entry_points:
+  main:
+    parameters:
+      alpha: {type: float, default: 0.5}
+    command: "python app_flow.py --alpha {alpha}"

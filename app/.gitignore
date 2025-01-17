@@ -1,0 +1,6 @@
+
+SBERT_model/fine_tuned_model/model.safetensors
+SBERT_model/wetransfer_fine_tuned_model_2024-12-18_2142.zip
+GPT2_model/text-similarity/gpt2-news-category/model.safetensors
+GPT2_model/text-similarity/gpt2-english/model.safetensors
+SBERT_model/fine_tuned_sbert_model/model.safetensors
